@@ -56,6 +56,7 @@ $savedCargoHome = $env:CARGO_HOME
 $savedRustupHome = $env:RUSTUP_HOME
 $savedPath = $env:PATH
 $savedPayloadZip = $env:MINILAUNCHER_PAYLOAD_ZIP
+$savedEncodedRustflags = $env:CARGO_ENCODED_RUSTFLAGS
 Push-Location $projectRoot
 try {
     if (Test-Path -LiteralPath (Join-Path $projectRoot '.tools\cargo\bin\cargo.exe')) {
@@ -70,6 +71,34 @@ try {
     if ($LASTEXITCODE -ne 0 -or 'host: x86_64-pc-windows-msvc' -notin $compilerInfo -or $env:CARGO_BUILD_TARGET) {
         throw '发行构建需要原生 x86_64-pc-windows-msvc 工具链，且不能设置 CARGO_BUILD_TARGET。'
     }
+    # Strip source locations from panic/file! strings as well as debug information.
+    # Encoded arguments also support build directories containing spaces.
+    $sysroot = & rustc --print sysroot
+    if ($LASTEXITCODE -ne 0) { throw '无法读取 Rust 工具链目录' }
+    $cargoHome = if ($env:CARGO_HOME) { [IO.Path]::GetFullPath($env:CARGO_HOME) } else { Join-Path $env:USERPROFILE '.cargo' }
+    $rustupHome = if ($env:RUSTUP_HOME) { [IO.Path]::GetFullPath($env:RUSTUP_HOME) } else { Join-Path $env:USERPROFILE '.rustup' }
+    $pathMappings = @(
+        @{ Source = $env:USERPROFILE; Destination = '/build/user' }
+        @{ Source = $projectRoot; Destination = '/build/mini-launcher' }
+        @{ Source = $cargoHome; Destination = '/build/cargo' }
+        @{ Source = $rustupHome; Destination = '/build/rustup' }
+        @{ Source = $sysroot; Destination = '/build/toolchain' }
+    ) | Where-Object { $_.Source } | Sort-Object { $_.Source.Length }
+    $releaseRustflags = if ($savedEncodedRustflags) {
+        @($savedEncodedRustflags.Split([char]0x1f))
+    } elseif ($env:RUSTFLAGS) {
+        @($env:RUSTFLAGS -split '\s+' | Where-Object { $_ })
+    } else { @() }
+    $releaseRustflags = @($releaseRustflags)
+    $pathCheckArguments = @()
+    # rustc uses the last matching mapping; more specific roots come last.
+    foreach ($mapping in $pathMappings) {
+        foreach ($source in @($mapping.Source.Replace('\', '/'), $mapping.Source.Replace('/', '\')) | Select-Object -Unique) {
+            $releaseRustflags += "--remap-path-prefix=$source=$($mapping.Destination)"
+        }
+        $pathCheckArguments += @('--private-root', $mapping.Source)
+    }
+    $env:CARGO_ENCODED_RUSTFLAGS = $releaseRustflags -join [char]0x1f
     $binaryPath = Join-Path $targetPath 'release'
     # Release builds now overwrite the same binaries used by development scripts.
     foreach ($process in @(Get-Process -ErrorAction SilentlyContinue)) {
@@ -79,11 +108,12 @@ try {
         }
     }
     $settingsExecutable = Join-Path $binaryPath 'mini-launcher-config.exe'
-    $settingsStamp = Join-Path $binaryPath 'settings-inputs.sha256'
+    $settingsStamp = Join-Path $binaryPath 'settings-release-inputs.sha256'
     $settingsFingerprint = & "$PSScriptRoot\settings-build-fingerprint.ps1" -ProjectRoot $projectRoot
+    $settingsFingerprint += "`n$env:CARGO_ENCODED_RUSTFLAGS"
     $reuse = $ReuseSettings -and (Test-Path -LiteralPath $settingsExecutable -PathType Leaf) -and
         (Test-Path -LiteralPath $settingsStamp -PathType Leaf) -and
-        ((Get-Content -LiteralPath $settingsStamp -Raw).Trim() -eq $settingsFingerprint)
+        ((Get-Content -LiteralPath $settingsStamp -Raw).TrimEnd() -eq $settingsFingerprint)
     $buildArguments = @('build', '--release', '--bins', '--locked', '--target-dir', $targetPath)
     if ($reuse) {
         Write-Output '设置源码和依赖声明未变，复用设置管理器（共享库变更可用 -RebuildSettings 强制更新）。'
@@ -94,8 +124,12 @@ try {
     & cargo @buildArguments
     if ($LASTEXITCODE -ne 0) { throw "发行编译失败，退出码 $LASTEXITCODE" }
     if (-not $reuse) {
-        Set-Content -LiteralPath $settingsStamp -Value $settingsFingerprint -Encoding ascii
+        Set-Content -LiteralPath $settingsStamp -Value $settingsFingerprint -Encoding utf8
     }
+    $releaseBinaries = @($settingsExecutable, (Join-Path $binaryPath 'mini-launcher.exe'))
+    $releaseBinaries += $pluginIds | ForEach-Object { Join-Path $binaryPath "$_.exe" }
+    & python -B "$PSScriptRoot\check-binary-paths.py" @pathCheckArguments --files @releaseBinaries
+    if ($LASTEXITCODE -ne 0) { throw '发行程序包含本机构建路径，停止打包。' }
     $revision = & git rev-parse --short HEAD
     if ($LASTEXITCODE -ne 0) { throw '无法读取构建提交号' }
     $dirty = @(& git status --porcelain --untracked-files=normal).Count -gt 0
@@ -202,6 +236,8 @@ GPL-3.0-or-later；许可正文见 LICENSE，第三方声明见 THIRD_PARTY_NOTI
     & cargo build --release --locked --bin mini-launcher-setup --target-dir $targetPath
     if ($LASTEXITCODE -ne 0) { throw "安装器编译失败，退出码 $LASTEXITCODE" }
     $setupExecutable = Join-Path $binaryPath 'mini-launcher-setup.exe'
+    & python -B "$PSScriptRoot\check-binary-paths.py" @pathCheckArguments --files $setupExecutable
+    if ($LASTEXITCODE -ne 0) { throw '安装器包含本机构建路径，停止打包。' }
     $setupOutputName = 'MiniLauncher-Setup-windows-x64.exe'
     Copy-PackageFile $setupExecutable (Join-Path $archivesPath $setupOutputName)
 
@@ -265,6 +301,7 @@ finally {
     $env:RUSTUP_HOME = $savedRustupHome
     $env:PATH = $savedPath
     $env:MINILAUNCHER_PAYLOAD_ZIP = $savedPayloadZip
+    $env:CARGO_ENCODED_RUSTFLAGS = $savedEncodedRustflags
     # Delete only this invocation's unique directory inside target/package-staging.
     $resolvedStaging = [IO.Path]::GetFullPath($stagingPath)
     if (-not $resolvedStaging.StartsWith($stagingPrefix, [StringComparison]::OrdinalIgnoreCase)) {
