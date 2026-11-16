@@ -1,6 +1,7 @@
 [CmdletBinding()]
 param(
     [string]$OutputDirectory = "$PSScriptRoot\..\target\packages",
+    [string]$SourceDownloadUrl = 'https://github.com/LumiaGG/MiniLauncher/releases',
     # Test restarts may reuse settings even when only its shared host library changed.
     [switch]$ReuseSettings
 )
@@ -145,7 +146,8 @@ try {
 构建来源：$sourceDescription
 许可：GPL-3.0-or-later，见 LICENSE 和 COPYRIGHT。
 
-对应源码：$sourceName，包含锁定依赖和构建脚本，可从本二进制的同一下载位置免费获取。
+对应源码：$sourceName，包含锁定依赖和构建脚本。
+免费下载位置：$SourceDownloadUrl
 发行地址：https://github.com/LumiaGG/MiniLauncher/releases
 构建与分发要求见源码包内 SOURCE_BUILD.md；第三方许可见 THIRD_PARTY_NOTICES.html。
 "@
@@ -273,7 +275,7 @@ GPL-3.0-or-later；许可正文见 LICENSE，第三方声明见 THIRD_PARTY_NOTI
 
 宿主为 Windows 10/11 x64 原生程序。插件独立运行，剪贴板历史随宿主常驻，其余按需启动，无需 .NET 运行时。
 开发示例 echo-plugin 不属于自带插件，本批不打包。各插件详细说明在各自 ZIP 的 README.md。
-发布时必须将上述源码 ZIP 与二进制放在同一下载位置，免费提供对应源码；详见 SOURCE.md。
+发布时免费提供上述源码 ZIP，并在二进制下载页明确链接其下载位置；详见 SOURCE.md。
 "@
     Set-Content -LiteralPath (Join-Path $archivesPath 'README.md') -Value $releaseReadme -Encoding utf8
     $hashes = @(Get-ChildItem -LiteralPath $archivesPath -File | Where-Object { $_.Extension -in @('.zip', '.exe') } | Sort-Object Name | ForEach-Object {

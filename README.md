@@ -147,4 +147,4 @@ MiniLauncher 面向对常驻开销、唤出响应与系统集成度有明确要�
 
 第三方组件保留各自许可，详见 [THIRD_PARTY_NOTICES.html](THIRD_PARTY_NOTICES.html) 和[依赖清单](docs/dependency-licenses.csv)。设置 → 关于支持离线查看许可。
 
-发行包附对应源码与构建脚本。构建及分发要求见 [SOURCE_BUILD.md](SOURCE_BUILD.md)。
+完整对应源码与构建脚本通过主发行说明中的独立源码下载链接提供。构建及分发要求见 [SOURCE_BUILD.md](SOURCE_BUILD.md)。

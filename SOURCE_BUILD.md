@@ -29,6 +29,26 @@ git -c user.name=LocalBuilder -c user.email=local@example.invalid commit -m "Imp
 
 ## 分发
 
-按 [GPL-3.0-or-later](LICENSE) 分发时，将二进制和对应 `Source.zip` 放在同一下载位置，免费提供源码，并保留 `LICENSE`、`COPYRIGHT`、`THIRD_PARTY_NOTICES.html` 和 `SOURCE.md`。修改版须提供修改后的对应源码。
+按 [GPL-3.0-or-later](LICENSE) 分发时，免费提供对应 `Source.zip`，并在二进制下载页明确链接源码下载位置；源码可放在独立下载页。软件包内部保留 `LICENSE`、`COPYRIGHT`、`THIRD_PARTY_NOTICES.html` 和 `SOURCE.md`。修改版须提供修改后的对应源码。
 
 发行脚本自动汇编第三方许可；缺少正文或校验失败会停止打包。依赖升级后的许可维护见 [legal/README.md](legal/README.md)。
+
+## 发布到 GitHub Releases
+
+更新版本、提交并推送源码后，在仓库根目录执行：
+
+```powershell
+.\scripts\publish-release.ps1
+# 可选：提供发布说明；上传中断后跳过已有构建继续上传
+.\scripts\publish-release.ps1 -NotesFile .\release-notes.md -SkipBuild
+```
+
+默认使用 `origin` 对应的公开 GitHub 仓库和 `v<版本>` 标签，产物位于
+`target/packages/<标签>-<提交号>/`。可用 `-Repository owner/repo`、`-Tag v0.2.0`
+显式指定仓库或标签。通过系统 Git 凭据管理器登录，或设置 `GH_TOKEN` / `GITHUB_TOKEN`；
+脚本不输出凭据。需要 PowerShell 7、Python 3.11+ 及现有构建环境。
+
+主发行页只上传安装器、便携包和插件 ZIP。完整对应源码单独发布到 `source-<标签>`，
+主发行说明提供下载链接，源码页不会被标记为最新版；许可材料已包含在软件包内部。
+脚本按本次构建清单选择文件，不收集目录中的其他旧包；上传完成后才公开草稿，
+不覆盖已有正式发行版。不自动核对 SHA256，也不下载远端文件复验；校验文件仅保留在本地构建目录。
