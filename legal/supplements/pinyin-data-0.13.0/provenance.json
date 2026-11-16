@@ -1,0 +1,13 @@
+{
+  "package": "pinyin-data",
+  "version": "0.13.0",
+  "package_commit": "889cde8bb0769747849f1d26bfc60c18efee1db3",
+  "commit": "889cde8bb0769747849f1d26bfc60c18efee1db3",
+  "files": [
+    {
+      "file": "LICENSE",
+      "url": "https://raw.githubusercontent.com/mozillazg/pinyin-data/889cde8bb0769747849f1d26bfc60c18efee1db3/LICENSE",
+      "sha256": "9c048697be2502a16e8bcb282d5d465a07295b2def0ffb05a269c5d39dbe1586"
+    }
+  ]
+}

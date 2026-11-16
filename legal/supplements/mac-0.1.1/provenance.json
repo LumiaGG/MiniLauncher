@@ -1,0 +1,17 @@
+{
+  "package": "mac",
+  "version": "0.1.1",
+  "commit": "66afc663b68a65633ea165c742b5a9c6734581c2",
+  "files": [
+    {
+      "file": "UPSTREAM-README.md",
+      "url": "https://raw.githubusercontent.com/reem/rust-mac/66afc663b68a65633ea165c742b5a9c6734581c2/README.md",
+      "sha256": "8edb7a912d295acf1e1cfeafdd19a6813a63b301c7bbfda3c67f65509bd8d8cc"
+    },
+    {
+      "file": "LICENSE-APACHE",
+      "url": "https://www.apache.org/licenses/LICENSE-2.0.txt",
+      "sha256": "cfc7749b96f63bd31c3c42b5c471bf756814053e847c10f3eb003417bc523d30"
+    }
+  ]
+}

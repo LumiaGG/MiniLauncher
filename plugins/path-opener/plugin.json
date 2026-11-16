@@ -1,0 +1,12 @@
+{
+  "id": "path-opener",
+  "name": "路径打开",
+  "config_key": "path_opener",
+  "config_defaults": "settings.default.toml",
+  "protocol_version": 2,
+  "executable": "path-opener.exe",
+  "keywords": ["path", "p", "*"],
+  "global_trigger": { "type": "path" },
+  "timeout_ms": 2000,
+  "idle_timeout_secs": 30
+}

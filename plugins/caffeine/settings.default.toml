@@ -1,0 +1,6 @@
+enabled = true
+keywords = ["caf", "caffeine", "awake"]
+keep_display_on = true
+default_duration_mins = 0
+# 开启防休眠时是否在系统托盘显示独立状态图标
+show_tray_icon = true

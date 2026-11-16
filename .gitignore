@@ -1,0 +1,6 @@
+/.tools/
+/target/
+/artifacts/
+/data/
+/portable.toml
+*.log

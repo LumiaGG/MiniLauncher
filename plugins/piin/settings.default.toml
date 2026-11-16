@@ -1,0 +1,4 @@
+enabled = true
+keywords = ["piin", "note", "备注"]
+direct_display = false
+hotkey_open = "Ctrl+Alt+N"

@@ -1,0 +1,8 @@
+enabled = true
+keywords = ["port", "kill", "ps"]
+show_system_processes = false
+sort_by = "memory"
+max_port_results = 50
+
+# 输入停止后再查询；0 表示立即查询
+debounce_ms = 350

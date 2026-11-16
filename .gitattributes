@@ -1,0 +1,7 @@
+* text=auto eol=lf
+
+# Preserve the exact upstream bytes verified by provenance.json, on every OS.
+legal/supplements/** -text -whitespace
+
+# Preserve whitespace quoted from upstream notices inside the generated HTML.
+THIRD_PARTY_NOTICES.html text eol=lf -whitespace

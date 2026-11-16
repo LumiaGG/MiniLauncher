@@ -1,0 +1,21 @@
+MiniLauncher
+Copyright (C) 2026 LumiaGG and contributors
+SPDX-License-Identifier: GPL-3.0-or-later
+
+MiniLauncher is free software: you can redistribute it and/or modify it
+under the terms of the GNU General Public License as published by the Free
+Software Foundation, either version 3 of the License, or (at your option)
+any later version.
+
+MiniLauncher is distributed in the hope that it will be useful, but WITHOUT
+ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or
+FITNESS FOR A PARTICULAR PURPOSE. See the GNU General Public License for
+more details. A copy is provided in LICENSE.
+
+This grant covers the original MiniLauncher host, settings application,
+installer and bundled plugins in this repository. Third-party components
+and assets retain their own copyrights and license terms; see
+THIRD_PARTY_NOTICES.html and the corresponding source distribution.
+
+This license declaration applies to the current and subsequent releases.
+It does not revoke permissions already granted for earlier versions.

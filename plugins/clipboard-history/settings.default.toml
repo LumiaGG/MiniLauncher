@@ -1,0 +1,5 @@
+enabled = true
+keywords = ["clip", "cb"]
+direct_display = true
+max_history = 100
+hotkey_open = "Ctrl+Alt+V"

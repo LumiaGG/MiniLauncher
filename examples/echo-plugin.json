@@ -1,0 +1,10 @@
+{
+  "id": "mini-echo",
+  "name": "Echo 示例插件",
+  "protocol_version": 2,
+  "executable": "echo-plugin.exe",
+  "args": [],
+  "keywords": ["echo"],
+  "timeout_ms": 800,
+  "idle_timeout_secs": 30
+}

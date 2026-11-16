@@ -1,0 +1,15 @@
+{
+  "id": "two-factor",
+  "name": "两步验证码",
+  "protocol_version": 2,
+  "executable": "two-factor.exe",
+  "keywords": ["2fa"],
+  "config_key": "two_factor",
+  "config_defaults": "settings.default.toml",
+  "timeout_ms": 1500,
+  "idle_timeout_secs": 30,
+  "settings_extension": {
+    "type": "two_factor_accounts",
+    "admin_args": ["--admin"]
+  }
+}

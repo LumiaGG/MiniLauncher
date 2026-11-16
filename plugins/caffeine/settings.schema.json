@@ -1,0 +1,24 @@
+{
+  "fields": {
+    "keep_display_on": {
+      "title": "默认保持屏幕常亮",
+      "description": "默认开启防休眠时同时阻止显示器自动关闭；关闭此项则默认仅阻止系统睡眠（允许自动息屏）。",
+      "type": "boolean"
+    },
+    "default_duration_mins": {
+      "title": "默认持续时间（分钟）",
+      "description": "一键开启防休眠时的默认倒计时分钟数（0–1440）。0 表示无限期开启，直到手动关闭或退出 MiniLauncher。",
+      "type": "integer",
+      "minimum": 0,
+      "maximum": 1440
+    },
+    "show_tray_icon": {
+      "title": "显示独立托盘图标",
+      "label": "显示独立托盘图标",
+      "description": "开启防休眠期间在系统托盘显示专属状态图标（右键可切换时长/模式，双击快速关闭）。",
+      "help": "开启防休眠期间在系统托盘显示专属状态图标（右键可切换时长/模式，双击快速关闭）",
+      "type": "boolean",
+      "default": true
+    }
+  }
+}

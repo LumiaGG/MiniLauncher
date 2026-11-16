@@ -1,0 +1,15 @@
+{
+  "id": "clipboard-history",
+  "name": "剪贴板历史",
+  "protocol_version": 2,
+  "executable": "clipboard-history.exe",
+  "keywords": ["clip", "cb"],
+  "config_key": "clipboard_history",
+  "config_defaults": "settings.default.toml",
+  "resident": true,
+  "direct_display": true,
+  "timeout_ms": 5000,
+  "hotkeys": [
+    { "id": "open", "default": "Ctrl+Alt+V" }
+  ]
+}

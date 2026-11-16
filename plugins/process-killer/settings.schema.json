@@ -1,0 +1,28 @@
+{
+  "fields": {
+    "show_system_processes": {
+      "title": "显示系统进程",
+      "description": "搜索进程时是否显示受保护的系统进程（核心进程仍受保护禁止终止）",
+      "type": "boolean",
+      "default": false
+    },
+    "sort_by": {
+      "title": "进程排序规则",
+      "description": "常规搜索进程时的排序指标",
+      "type": "string",
+      "enum": [
+        "memory",
+        "name"
+      ],
+      "default": "memory"
+    },
+    "debounce_ms": {
+      "title": "输入冷却时间（毫秒）",
+      "type": "integer",
+      "minimum": 0,
+      "maximum": 5000,
+      "default": 350,
+      "description": "输入停止达到该毫秒数后才查询进程和端口，避免打字过程中频繁扫描（0 表示立即查询）。"
+    }
+  }
+}

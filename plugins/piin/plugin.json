@@ -1,0 +1,22 @@
+{
+  "id": "piin",
+  "name": "Piin 备注",
+  "protocol_version": 2,
+  "executable": "piin.exe",
+  "keywords": [
+    "piin",
+    "note",
+    "备注"
+  ],
+  "config_key": "piin",
+  "config_defaults": "settings.default.toml",
+  "timeout_ms": 5000,
+  "hotkeys": [
+    {
+      "id": "open",
+      "default": "Ctrl+Alt+N"
+    }
+  ],
+  "accepts_images": true,
+  "idle_timeout_secs": 300
+}

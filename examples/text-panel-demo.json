@@ -1,0 +1,9 @@
+{
+  "id": "text-panel-demo",
+  "name": "文本面板 Demo",
+  "protocol_version": 2,
+  "executable": "text-panel-demo.exe",
+  "keywords": ["textdemo"],
+  "timeout_ms": 1000,
+  "idle_timeout_secs": 300
+}

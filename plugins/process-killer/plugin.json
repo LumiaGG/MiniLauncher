@@ -1,0 +1,15 @@
+{
+  "id": "process-killer",
+  "name": "进程与端口管理",
+  "protocol_version": 2,
+  "executable": "process-killer.exe",
+  "keywords": ["port", "kill", "ps", "*"],
+  "global_trigger": {
+    "type": "prefix",
+    "values": [":"]
+  },
+  "config_key": "process_killer",
+  "config_defaults": "settings.default.toml",
+  "timeout_ms": 10000,
+  "idle_timeout_secs": 30
+}

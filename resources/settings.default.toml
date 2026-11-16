@@ -1,0 +1,81 @@
+# 根配置必须放在 [web_search]、[everything]、[plugins]、[aliases] 等表名之前。
+# 保存后自动生效；配置错误或快捷键被占用时继续使用上一次有效配置。
+
+# 基础设置：以下配置必须位于所有 [分组] 之前。
+# Ctrl / Alt / Shift / Win + 字母、数字、F1–F24、Space 等，例如 Alt+Q
+hotkey = "Alt+Space"
+# 同键双击示例：Ctrl+Ctrl、Alt+Alt、Shift+Shift、Win+Win、Space+Space、A+A。
+# 双击不拦截原按键行为，也无法检测其他软件的占用。
+# system / light / dark
+theme = "system"
+# none / mica / acrylic；系统不支持时回退实色
+backdrop = "mica"
+# 结果区高度为 1–8 个标准行；图片、多行条目可增高，其他结果可滚动浏览
+max_results = 6
+# 搜索栏宽度 480–1440，按屏幕 DPI 缩放；默认 856
+window_width = 856
+# 登录 Windows 后静默启动到托盘
+start_at_login = false
+# 默认使用安装目录下的 data；切换后重启迁移数据
+portable_mode = true
+# 额外扫描应用/快捷方式的目录，Windows 路径建议使用单引号
+search_paths = []
+# 综合搜索优先级：整数，数值越大越靠前；同分保持应用、文件、插件的顺序
+application_priority = 0
+
+[aliases]
+# 应用别名：名称 = '应用或目录的完整路径'
+# vscode = 'C:\Program Files\Microsoft VS Code\Code.exe'
+# projects = 'D:\Project'
+
+[everything]
+enabled = true
+# 与应用、插件使用相同的优先级尺度
+priority = 0
+keyword = "e"
+# 是否在综合搜索中包含文件结果
+global_search = false
+# 文件结果数量 1–1000
+max_results = 200
+# 查询超时 100–5000 毫秒
+timeout_ms = 1000
+
+[web_search]
+enabled = true
+# fallback：无匹配时显示；always：追加在结果末尾；keyword_only：仅关键词触发
+mode = "fallback"
+default_engine = "google"
+
+[[web_search.engines]]
+id = "google"
+name = "Google"
+keywords = ["g"]
+url = "https://www.google.com/search?q={query}"
+
+[[web_search.engines]]
+id = "bing"
+name = "Bing"
+keywords = ["bing"]
+url = "https://www.bing.com/search?q={query}"
+
+[plugins]
+enabled = true
+# 空数组使用当前数据目录的 plugins；便携模式默认位于安装目录的 data\plugins
+directories = []
+# 同时保温的进程数 1–4
+max_processes = 2
+# 已安装插件可声明默认配置，自动补充到下方的 [plugins.<config_key>]。
+
+[scope_menu]
+# 菜单项顺序即显示顺序；visible 仅控制菜单，来源仍跟随自身启用开关。
+# name 留空沿用来源名称；新引擎及插件自动追加。
+# shortcut 可设为 "Alt+0" 至 "Alt+9"，设为 "" 禁用；不填写时综合、文件、默认网页分别沿用 Alt+1/2/3。
+[[scope_menu.items]]
+id = "all"
+name = ""
+visible = true
+
+[[scope_menu.items]]
+id = "files"
+name = ""
+visible = true

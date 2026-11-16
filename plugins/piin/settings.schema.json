@@ -1,0 +1,1 @@
+{"fields":{"direct_display":{"title":"直接显示（空输入）","description":"在综合范围空输入时显示保存的备注。","type":"boolean"},"hotkey_open":{"title":"全局唤出快捷键","description":"默认 Ctrl+Alt+N；留空禁用。","type":"string","format":"hotkey"}}}

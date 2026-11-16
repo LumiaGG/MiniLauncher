@@ -1,0 +1,11 @@
+{
+  "id": "caffeine",
+  "name": "防休眠",
+  "protocol_version": 2,
+  "executable": "caffeine.exe",
+  "keywords": ["caf", "caffeine", "awake"],
+  "config_key": "caffeine",
+  "config_defaults": "settings.default.toml",
+  "resident": true,
+  "timeout_ms": 2000
+}
