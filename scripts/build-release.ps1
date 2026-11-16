@@ -1,7 +1,7 @@
 [CmdletBinding()]
 param(
     [string]$OutputDirectory = "$PSScriptRoot\..\target\packages",
-    [string]$SourceDownloadUrl = 'https://github.com/LumiaGG/MiniLauncher/releases',
+    [string]$SourceRepository = 'https://github.com/LumiaGG/MiniLauncher',
     # Test restarts may reuse settings even when only its shared host library changed.
     [switch]$ReuseSettings
 )
@@ -133,33 +133,26 @@ try {
     if ($LASTEXITCODE -ne 0) { throw '发行程序包含本机构建路径，停止打包。' }
     $revision = & git rev-parse --short HEAD
     if ($LASTEXITCODE -ne 0) { throw '无法读取构建提交号' }
-    $dirty = @(& git status --porcelain --untracked-files=normal).Count -gt 0
+    $fullRevision = & git rev-parse HEAD
+    if ($LASTEXITCODE -ne 0) { throw '无法读取完整构建提交号' }
+    $dirty = @(& git status --porcelain --untracked-files=no).Count -gt 0
     $sourceDescription = "$revision" + $(if ($dirty) { '（含未提交改动）' } else { '' })
 
     [void][IO.Directory]::CreateDirectory($stagingPath)
     $archivesPath = Join-Path $stagingPath 'archives'
     [void][IO.Directory]::CreateDirectory($archivesPath)
-    $sourceName = "MiniLauncher-$version-$revision-Source.zip"
     $sourceNotice = @"
 # MiniLauncher 对应源码
 
 构建来源：$sourceDescription
 许可：GPL-3.0-or-later，见 LICENSE 和 COPYRIGHT。
 
-对应源码：$sourceName，包含锁定依赖和构建脚本。
-免费下载位置：$SourceDownloadUrl
-发行地址：https://github.com/LumiaGG/MiniLauncher/releases
-构建与分发要求见源码包内 SOURCE_BUILD.md；第三方许可见 THIRD_PARTY_NOTICES.html。
+对应版本源码：$SourceRepository/tree/$fullRevision
+构建说明和脚本包含在仓库中，Cargo.lock 固定依赖版本；构建时通过 Cargo 下载依赖。
+发行地址：$SourceRepository/releases
+构建与分发要求见仓库 SOURCE_BUILD.md；第三方许可见 THIRD_PARTY_NOTICES.html。
 "@
     Set-Content -LiteralPath (Join-Path $archivesPath 'SOURCE.md') -Value $sourceNotice -Encoding utf8
-    $vendorPath = Join-Path $targetPath 'legal-vendor'
-    & cargo vendor --locked --offline --respect-source-config --versioned-dirs $vendorPath > (Join-Path $stagingPath 'vendor-config.toml') 2> (Join-Path $stagingPath 'vendor.log')
-    if ($LASTEXITCODE -ne 0) {
-        Get-Content -LiteralPath (Join-Path $stagingPath 'vendor.log') -Tail 20
-        throw '对应源码依赖不完整，请先 cargo fetch --locked 后重新打包。'
-    }
-    & python "$PSScriptRoot\package-corresponding-source.py" --output (Join-Path $archivesPath $sourceName) --vendor-directory $vendorPath
-    if ($LASTEXITCODE -ne 0) { throw '对应源码包生成失败，停止发行。' }
     Copy-LicenseMaterials $archivesPath
 
     $hostPath = Join-Path $stagingPath 'MiniLauncher'
@@ -256,8 +249,7 @@ GPL-3.0-or-later；许可正文见 LICENSE，第三方声明见 THIRD_PARTY_NOTI
 - clipboard-history-windows-x64.zip：剪贴板文本及图片历史插件，关键词 clip / cb，随宿主监听。
 - piin-windows-x64.zip：文本及图片备注插件，关键词 piin / note，支持手动保存与置顶。
 - caffeine-windows-x64.zip：防休眠与屏幕常亮插件，关键词 caf / caffeine / awake，支持定时关闭。
-- SHA256SUMS.txt：上述发行文件与安装包的 SHA256 校验值。
-- $sourceName：本次二进制的完整对应源码，包含锁定依赖源码与离线构建说明。
+- process-killer-windows-x64.zip：进程与端口管理插件，关键词 port / kill / ps。
 - LICENSE / COPYRIGHT / THIRD_PARTY_NOTICES.html / SOURCE.md：项目许可、第三方声明及源码获取说明。
 - unpacked\MiniLauncher\：已解压的宿主程序、配置示例和说明。
 - unpacked\path-opener\、unpacked\two-factor\、unpacked\clipboard-history\、unpacked\caffeine\、unpacked\process-killer\、unpacked\piin\：已解压的插件。
@@ -275,14 +267,14 @@ GPL-3.0-or-later；许可正文见 LICENSE，第三方声明见 THIRD_PARTY_NOTI
 
 宿主为 Windows 10/11 x64 原生程序。插件独立运行，剪贴板历史随宿主常驻，其余按需启动，无需 .NET 运行时。
 开发示例 echo-plugin 不属于自带插件，本批不打包。各插件详细说明在各自 ZIP 的 README.md。
-发布时免费提供上述源码 ZIP，并在二进制下载页明确链接其下载位置；详见 SOURCE.md。
+对应版本源码：$SourceRepository/tree/$fullRevision，详见 SOURCE.md。
 "@
     Set-Content -LiteralPath (Join-Path $archivesPath 'README.md') -Value $releaseReadme -Encoding utf8
-    $hashes = @(Get-ChildItem -LiteralPath $archivesPath -File | Where-Object { $_.Extension -in @('.zip', '.exe') } | Sort-Object Name | ForEach-Object {
-        $hash = (Get-FileHash -LiteralPath $_.FullName -Algorithm SHA256).Hash.ToLowerInvariant()
-        "$hash  $($_.Name)"
-    })
-    Set-Content -LiteralPath (Join-Path $archivesPath 'SHA256SUMS.txt') -Value $hashes -Encoding ascii
+    $releaseManifest = @{
+        revision = $fullRevision
+        assets = @(Get-ChildItem -LiteralPath $archivesPath -File | Where-Object { $_.Extension -in @('.zip', '.exe') } | Sort-Object Name | ForEach-Object { $_.Name })
+    }
+    $releaseManifest | ConvertTo-Json | Set-Content -LiteralPath (Join-Path $archivesPath 'release-manifest.json') -Encoding utf8
 
     # Publish archives and ready-to-copy directories without clearing the output directory.
     [void][IO.Directory]::CreateDirectory($outputPath)

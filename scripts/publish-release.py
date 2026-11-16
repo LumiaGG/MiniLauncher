@@ -12,7 +12,6 @@ import tomllib
 import urllib.error
 import urllib.parse
 import urllib.request
-import zipfile
 
 ROOT = Path(__file__).resolve().parent.parent
 API = "https://api.github.com"
@@ -23,7 +22,7 @@ def git(*args: str) -> str:
 
 
 def ensure_clean() -> None:
-    # Untracked local tools are never source-package inputs.
+    # Untracked local tools are not build inputs.
     for args in (("diff", "--quiet"), ("diff", "--cached", "--quiet")):
         if subprocess.run(["git", *args], cwd=ROOT).returncode:
             raise RuntimeError("Commit tracked changes before publishing")
@@ -64,29 +63,24 @@ def request(path: str, token: str, method="GET", data=None, content_type="applic
 
 def release_assets(output: Path, revision: str) -> list[Path]:
     # Use the build's explicit inventory, never glob a directory with old files.
-    # SHA256SUMS is a local inventory; publishing does not recompute hashes.
-    names = []
-    for line in (output / "SHA256SUMS.txt").read_text(encoding="utf-8-sig").splitlines():
-        _, name = line.split("  ", 1)
-        if not name or "/" in name or "\\" in name or Path(name).suffix not in (".zip", ".exe"):
+    manifest = json.loads((output / "release-manifest.json").read_text(encoding="utf-8-sig"))
+    if manifest["revision"] != revision:
+        raise RuntimeError("Build does not match HEAD; rebuild before publishing")
+    names = manifest["assets"]
+    for name in names:
+        if not isinstance(name, str) or not re.fullmatch(r"[A-Za-z0-9_-]+-windows-x64\.(?:zip|exe)", name):
             raise RuntimeError("Invalid release inventory filename")
-        names.append(name)
     if len(names) != len(set(names)):
         raise RuntimeError("Duplicate release inventory entry")
-    sources = [name for name in names if name.endswith("-Source.zip")]
-    if len(sources) != 1 or not {"MiniLauncher-Setup-windows-x64.exe", "MiniLauncher-Portable-windows-x64.zip"}.issubset(names):
-        raise RuntimeError("Missing installer, portable archive or corresponding source")
-    with zipfile.ZipFile(output / sources[0]) as archive:
-        manifest = json.loads(archive.read("MiniLauncher-source/SOURCE_MANIFEST.json"))
-        if manifest["base_revision"] != revision:
-            raise RuntimeError("Source package does not match HEAD; rebuild before publishing")
+    if not {"MiniLauncher-Setup-windows-x64.exe", "MiniLauncher-Portable-windows-x64.zip"}.issubset(names):
+        raise RuntimeError("Missing installer or portable archive")
     assets = [output / name for name in names]
     if any(not path.is_file() or not path.stat().st_size for path in assets):
         raise RuntimeError("Missing or empty release asset")
     return assets
 
 
-def publish(repository: str, tag: str, revision: str, notes: str, assets: list[Path], token: str, *, latest=True) -> str:
+def publish(repository: str, tag: str, revision: str, notes: str, assets: list[Path], token: str) -> str:
     endpoint = f"/repos/{repository}/releases"
     # Lookup by tag also includes drafts visible to the authenticated maintainer.
     existing = None
@@ -99,7 +93,7 @@ def publish(repository: str, tag: str, revision: str, notes: str, assets: list[P
         raise RuntimeError(f"Tag {tag} already belongs to a published release or another revision; choose a new version")
     release = existing or request(endpoint, token, "POST", {
         "tag_name": tag, "target_commitish": revision,
-        "name": f"MiniLauncher {tag}" if latest else f"MiniLauncher corresponding source {tag}",
+        "name": f"MiniLauncher {tag}",
         "body": notes, "draft": True, "prerelease": False})
     print(f"Draft: {release['html_url']}", flush=True)
     uploaded = {asset["name"]: asset for asset in release["assets"]}
@@ -119,7 +113,7 @@ def publish(repository: str, tag: str, revision: str, notes: str, assets: list[P
         if asset["state"] != "uploaded" or asset["size"] != path.stat().st_size:
             raise RuntimeError(f"Incomplete upload: {path.name}")
     release = request(f"{endpoint}/{release['id']}", token, "PATCH", {
-        "draft": False, "make_latest": "true" if latest else "false", "body": notes})
+        "draft": False, "make_latest": "true", "body": notes})
     return release["html_url"]
 
 
@@ -161,38 +155,15 @@ def main() -> None:
     if current_release and not current_release["draft"]:
         raise RuntimeError(f"Release {tag} is already published; choose a new version before building")
     output = ROOT / "target" / "packages" / f"{tag}-{short}"
-    source_tag = f"source-{tag}"
-    source_url = f"https://github.com/{repository}/releases/tag/{source_tag}"
     if not args.skip_build:
         subprocess.run(["pwsh", "-NoProfile", "-File", str(ROOT / "scripts/build-release.ps1"),
-                        "-OutputDirectory", str(output), "-SourceDownloadUrl", source_url], cwd=ROOT, check=True)
+                        "-OutputDirectory", str(output), "-SourceRepository", f"https://github.com/{repository}"], cwd=ROOT, check=True)
     ensure_clean()
     if git("rev-parse", "HEAD") != revision:
         raise RuntimeError("HEAD changed during build; restart publishing")
     assets = release_assets(output, revision)
-    sources = [path for path in assets if path.name.endswith("-Source.zip")]
-    binaries = [path for path in assets if path not in sources]
-    # Source downloads live separately so the normal release lists only apps/plugins.
-    # A completed source release can be reused after interruption without reuploading it.
-    try:
-        existing_source = request(f"/repos/{repository}/releases/tags/{source_tag}", token)
-    except urllib.error.HTTPError as error:
-        if error.code != 404:
-            raise
-        existing_source = None
-    if existing_source and not existing_source["draft"]:
-        remote_assets = existing_source["assets"]
-        if (existing_source["target_commitish"] != revision or len(remote_assets) != 1
-                or remote_assets[0]["name"] != sources[0].name
-                or remote_assets[0]["state"] != "uploaded"
-                or remote_assets[0]["size"] != sources[0].stat().st_size):
-            raise RuntimeError("Published source release does not match the local source package")
-    else:
-        publish(repository, source_tag, revision,
-                f"对应 {tag} 的完整源码、锁定依赖及离线构建说明。源码提交：`{revision}`。",
-                sources, token, latest=False)
-    notes += f"\n\n对应源码、锁定依赖及离线构建说明：[独立源码下载页]({source_url})。\n"
-    print("Published: " + publish(repository, tag, revision, notes, binaries, token), flush=True)
+    notes += f"\n\n对应版本源码与构建说明：[源码仓库](https://github.com/{repository}/tree/{revision})。\n"
+    print("Published: " + publish(repository, tag, revision, notes, assets, token), flush=True)
 
 
 if __name__ == "__main__":

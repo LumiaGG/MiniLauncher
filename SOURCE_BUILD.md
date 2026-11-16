@@ -4,22 +4,20 @@
 
 ## 构建
 
-解压源码包并进入 `MiniLauncher-source`。工具链版本见 `SOURCE_MANIFEST.json`；依赖已包含在 `vendor/` 中。
+克隆仓库并切换到发行说明中的提交或对应标签。首次构建需联网下载 Cargo.lock 锁定的依赖。
 
 ```powershell
-cargo build --release --workspace --bins --locked --offline
+cargo build --release --workspace --bins --locked
 ```
 
-生成完整发行包需运行下列脚本；从源码 ZIP 构建时，先建立 Git 仓库：
+生成完整发行包运行：
 
 ```powershell
-git init
-git add .
-git -c user.name=LocalBuilder -c user.email=local@example.invalid commit -m "Import corresponding source"
 .\scripts\build-release.ps1
 ```
 
-普通 `cargo build` 生成的安装器仅含占位载荷。发行脚本生成实际安装器、便携包、插件包、对应源码和校验文件。
+普通 `cargo build` 生成的安装器仅含占位载荷。发行脚本生成实际安装器、便携包和插件包。
+`release-manifest.json` 记录构建提交和产物文件名，不包含哈希；不再复制全部依赖或制作离线源码包。
 
 发行脚本通过 Rust 的 `--remap-path-prefix` 将项目、用户、Cargo 和工具链目录
 映射为 `/build/` 下的固定路径，覆盖宿主、设置程序、插件、依赖和安装器。
@@ -29,7 +27,9 @@ git -c user.name=LocalBuilder -c user.email=local@example.invalid commit -m "Imp
 
 ## 分发
 
-按 [GPL-3.0-or-later](LICENSE) 分发时，免费提供对应 `Source.zip`，并在二进制下载页明确链接源码下载位置；源码可放在独立下载页。软件包内部保留 `LICENSE`、`COPYRIGHT`、`THIRD_PARTY_NOTICES.html` 和 `SOURCE.md`。修改版须提供修改后的对应源码。
+发行说明和包内 `SOURCE.md` 链接对应提交的公开源码仓库。软件包内部保留
+`LICENSE`、`COPYRIGHT`、`THIRD_PARTY_NOTICES.html` 和 `SOURCE.md`。项目采用
+[GPL-3.0-or-later](LICENSE)，分发修改版时应同时提供对应修改源码及构建说明。
 
 发行脚本自动汇编第三方许可；缺少正文或校验失败会停止打包。依赖升级后的许可维护见 [legal/README.md](legal/README.md)。
 
@@ -48,7 +48,6 @@ git -c user.name=LocalBuilder -c user.email=local@example.invalid commit -m "Imp
 显式指定仓库或标签。通过系统 Git 凭据管理器登录，或设置 `GH_TOKEN` / `GITHUB_TOKEN`；
 脚本不输出凭据。需要 PowerShell 7、Python 3.11+ 及现有构建环境。
 
-主发行页只上传安装器、便携包和插件 ZIP。完整对应源码单独发布到 `source-<标签>`，
-主发行说明提供下载链接，源码页不会被标记为最新版；许可材料已包含在软件包内部。
+发行页只上传安装器、便携包和插件 ZIP，并链接对应提交的源码仓库；许可材料已包含在软件包内部。
 脚本按本次构建清单选择文件，不收集目录中的其他旧包；上传完成后才公开草稿，
-不覆盖已有正式发行版。不自动核对 SHA256，也不下载远端文件复验；校验文件仅保留在本地构建目录。
+不覆盖已有正式发行版。不生成或核对发行文件 SHA256，也不下载远端文件复验。

@@ -1,13 +1,11 @@
-"""Targeted checks for offline notices and corresponding-source release guards."""
+"""Targeted checks for offline notices and release asset selection."""
 import hashlib
 import importlib.util
 import json
 from pathlib import Path
-import subprocess
 import tempfile
 import unittest
 from unittest.mock import patch
-import zipfile
 
 
 ROOT = Path(__file__).resolve().parent.parent
@@ -21,7 +19,7 @@ def load(name, filename):
 
 
 notices = load("notices", "collect-third-party-licenses.py")
-source = load("source", "package-corresponding-source.py")
+publisher = load("publisher", "publish-release.py")
 
 
 class LicensePackagingTests(unittest.TestCase):
@@ -65,45 +63,19 @@ class LicensePackagingTests(unittest.TestCase):
             with self.assertRaisesRegex(RuntimeError, "checksum mismatch"):
                 notices.generate(self.root / "tampered.html")
 
-    def test_source_includes_working_tree_changes_excludes_untracked_data_and_checks_vendor(self):
-        project = self.root / "project"
-        project.mkdir()
-        subprocess.run(["git", "init", "-q", str(project)], check=True)
-        for name in ("LICENSE", "COPYRIGHT", "THIRD_PARTY_NOTICES.html", "SOURCE_BUILD.md",
-                     "scripts/package-corresponding-source.py", "scripts/collect-third-party-licenses.py", "src/lib.rs"):
-            path = project / name
-            path.parent.mkdir(parents=True, exist_ok=True)
-            path.write_text("tracked source", encoding="utf-8")
-        vendor = self.root / "vendor" / "example-1.0.0"
-        vendor.mkdir(parents=True)
-        data = b"original dependency"
-        (vendor / "lib.rs").write_bytes(data)
-        checksum = "a" * 64
-        (vendor / ".cargo-checksum.json").write_text(json.dumps({
-            "package": checksum, "files": {"lib.rs": hashlib.sha256(data).hexdigest()}}), encoding="utf-8")
-        (project / "Cargo.lock").write_text(f'''version = 4
-[[package]]
-name = "example"
-version = "1.0.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "{checksum}"
-''', encoding="utf-8")
-        subprocess.run(["git", "-C", str(project), "add", "."], check=True, capture_output=True)
-        subprocess.run(["git", "-C", str(project), "-c", "user.name=Test", "-c", "user.email=test@example.invalid",
-                        "commit", "-qm", "Fixture"], check=True, capture_output=True)
-        (project / "src/lib.rs").write_text("modified build input", encoding="utf-8")
-        (project / "private-secret.txt").write_text("do not distribute", encoding="utf-8")
-        output = self.root / "source.zip"
-        with patch.object(source, "ROOT", project):
-            source.package(output, vendor.parent)
-            with zipfile.ZipFile(output) as archive:
-                self.assertEqual(archive.read("MiniLauncher-source/src/lib.rs"), b"modified build input")
-                self.assertEqual(archive.read("MiniLauncher-source/vendor/example-1.0.0/lib.rs"), data)
-                self.assertFalse(any("private-secret" in name for name in archive.namelist()))
-                self.assertIn(b'directory = "vendor"', archive.read("MiniLauncher-source/.cargo/config.toml"))
-            (vendor / "lib.rs").write_text("modified dependency", encoding="utf-8")
-            with self.assertRaisesRegex(RuntimeError, "Modified/unexpected vendored file"):
-                source.package(self.root / "invalid-source.zip", vendor.parent)
+    def test_release_inventory_excludes_unlisted_files_and_rejects_stale_build(self):
+        names = ["MiniLauncher-Setup-windows-x64.exe", "MiniLauncher-Portable-windows-x64.zip",
+                 "example-windows-x64.zip"]
+        for name in names + ["old-Source.zip", "private-secret.txt"]:
+            (self.root / name).write_bytes(b"fixture")
+        manifest = self.root / "release-manifest.json"
+        manifest.write_text(json.dumps({"revision": "current", "assets": names}), encoding="utf-8")
+        self.assertEqual([path.name for path in publisher.release_assets(self.root, "current")], names)
+        with self.assertRaisesRegex(RuntimeError, "does not match HEAD"):
+            publisher.release_assets(self.root, "stale")
+        manifest.write_text(json.dumps({"revision": "current", "assets": names + ["old-Source.zip"]}), encoding="utf-8")
+        with self.assertRaisesRegex(RuntimeError, "Invalid release inventory"):
+            publisher.release_assets(self.root, "current")
 
 
 if __name__ == "__main__":
