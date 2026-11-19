@@ -211,6 +211,11 @@ impl Settings {
                 )
             });
             for (name, value) in entries {
+                if matches!(path.as_slice(), [Part::Key(section), Part::Key(_)] if section == "plugins")
+                    && self.plugin_credentials.as_ref().is_some_and(|editor| &editor.target_field == name)
+                {
+                    continue;
+                }
                 let mut child = path.clone();
                 child.push(key(name));
                 self.add_fields(child, value.clone(), window, cx);

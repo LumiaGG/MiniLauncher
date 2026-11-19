@@ -19,6 +19,7 @@ mod about;
 mod appearance;
 mod applications;
 mod collection;
+mod credentials;
 mod fields;
 mod page_model;
 mod scope;
@@ -135,6 +136,7 @@ struct Settings {
     plugin: Option<String>,
     catalog: Vec<plugin_catalog::PluginInfo>,
     fields: Vec<Field>,
+    plugin_credentials: Option<credentials::CredentialEditor>,
     scope_rows: Vec<scope::ScopeRow>,
     tfa: Vec<two_factor::TfaAccount>,
     tfa_error: Option<String>,
@@ -169,6 +171,7 @@ impl Settings {
             plugin: None,
             catalog: vec![],
             fields: vec![],
+            plugin_credentials: None,
             scope_rows: vec![],
             tfa: vec![],
             tfa_error: None,
@@ -202,6 +205,9 @@ impl Settings {
         if let Ok(settings) = self.draft.value.clone().try_into::<config::Settings>() {
             self.catalog = plugin_catalog::inspect(&settings.plugins);
         }
+        self.plugin_credentials = self.current_plugin().and_then(|plugin| {
+            credentials::CredentialEditor::new(plugin, &self.draft.value, window, cx)
+        });
         let roots = if let Some(plugin) = &self.plugin {
             vec![vec![key("plugins"), key(plugin)]]
         } else {
@@ -1055,6 +1061,9 @@ impl Render for Settings {
                     );
                 }
                 None => {}
+            }
+            if let Some(editor) = &self.plugin_credentials {
+                content.push(editor.render(self.busy, cx));
             }
         }
         if self.page == 4 && self.plugin.is_none() {
