@@ -572,29 +572,32 @@ impl Settings {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
+        let update = plan.is_update();
+        let action = if update { "更新" } else { "安装" };
         let description = format!(
-            "{}（{}）\n{} 个文件，共 {} KiB\n安装到：{}",
+            "{}（{}）\n{} 个包内项目，共 {} KiB\n目录：{}{}",
             plan.name,
             plan.id,
             plan.entries,
             plan.bytes.div_ceil(1024),
-            plan.target.to_string_lossy().trim_start_matches(r"\\?\")
+            plan.target.to_string_lossy().trim_start_matches(r"\\?\"),
+            if update { "\n保留现有设置，并将旧版本归档到 plugin-backups。" } else { "" },
         );
         let pending = std::rc::Rc::new(std::cell::RefCell::new(Some(plan)));
         let close_pending = pending.clone();
         let owner = cx.entity().downgrade();
         let close_owner = owner.clone();
-        self.status = "请确认安装插件".into();
+        self.status = format!("请确认{action}插件");
         window.activate_window();
         window.open_alert_dialog(cx, move |dialog, _, _| {
             let owner = owner.clone();
             let pending = pending.clone();
             dialog
                 .confirm()
-                .title("安装插件")
+                .title(if update { "更新插件" } else { "安装插件" })
                 .width(px(620.))
                 .description(description.clone())
-                .ok_text("安装")
+                .ok_text(action)
                 .cancel_text("取消")
                 .on_ok(move |_, window, cx| {
                     owner
@@ -621,7 +624,7 @@ impl Settings {
                         if pending.borrow_mut().take().is_some() {
                             let _ = owner.update(cx, |this, cx| {
                                 this.busy = false;
-                                this.status = "已取消安装".into();
+                                this.status = format!("已取消{action}");
                                 cx.notify();
                             });
                         }

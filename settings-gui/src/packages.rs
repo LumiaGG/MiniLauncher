@@ -265,7 +265,71 @@ pub struct InstallPlan {
     pub config_key: String,
     pub entries: usize,
     pub bytes: u64,
+    previous: Option<Installed>,
 }
+
+#[derive(PartialEq, Eq)]
+struct Installed {
+    manifest: String,
+    executable: PathBuf,
+}
+
+impl InstallPlan {
+    pub fn is_update(&self) -> bool {
+        self.previous.is_some()
+    }
+}
+
+fn installed(target: &Path, id: &str, config_key: &str) -> Result<Option<Installed>, String> {
+    let metadata = match fs::symlink_metadata(target) {
+        Ok(metadata) => metadata,
+        Err(e) if e.kind() == io::ErrorKind::NotFound => return Ok(None),
+        Err(e) => return Err(error(e)),
+    };
+    if !metadata.is_dir() || reparse(&metadata) {
+        return Err("安装位置已被文件、链接或重解析点占用".into());
+    }
+    let manifest_path = target.join("plugin.json");
+    if !fs::symlink_metadata(&manifest_path)
+        .is_ok_and(|m| m.is_file() && !reparse(&m) && m.len() <= 64 * 1024)
+    {
+        return Err("现有目录缺少有效的插件清单，无法更新".into());
+    }
+    let manifest = fs::read_to_string(manifest_path).map_err(error)?;
+    let parsed: serde_json::Value = serde_json::from_str(&manifest).map_err(error)?;
+    let old_key = parsed["config_key"]
+        .as_str()
+        .map(str::to_owned)
+        .unwrap_or_else(|| mini_launcher::plugin_config::key(id));
+    if parsed["id"].as_str() != Some(id) || old_key != config_key {
+        return Err("安装位置已存在，但插件 ID 或配置标识不一致，无法更新".into());
+    }
+    let executable = relative(
+        parsed["executable"]
+            .as_str()
+            .ok_or("现有插件缺少程序路径")?,
+    )?;
+    Ok(Some(Installed {
+        manifest,
+        executable,
+    }))
+}
+
+fn check_conflicts(draft: &Draft, id: &str, config_key: &str, target: &Path) -> Result<(), String> {
+    let settings: config::Settings = draft.value.clone().try_into().map_err(error)?;
+    for plugin in mini_launcher::plugin_catalog::inspect(&settings.plugins) {
+        if (plugin.config_key == config_key || plugin.id.eq_ignore_ascii_case(id))
+            && identity(&plugin.directory) != identity(target)
+        {
+            return Err(format!(
+                "已登记同 ID 或配置标识的插件：{}。请先取消冲突的登记。",
+                plugin.name
+            ));
+        }
+    }
+    Ok(())
+}
+
 pub fn prepare(source: &Path, draft: &Draft) -> Result<InstallPlan, String> {
     clean(draft)?;
     let base = storage(draft)?;
@@ -308,27 +372,18 @@ pub fn prepare(source: &Path, draft: &Draft) -> Result<InstallPlan, String> {
         .map(String::from)
         .unwrap_or_else(|| mini_launcher::plugin_config::key(&id));
     let target = root.join(&id);
-    if fs::symlink_metadata(&target).is_ok() {
-        return Err(format!(
-            "安装目录已存在，请先卸载旧插件：{}",
-            target.display()
-        ));
-    }
-    let settings: config::Settings = draft.value.clone().try_into().map_err(error)?;
-    #[cfg(windows)]
-    for plugin in mini_launcher::plugin_catalog::inspect(&settings.plugins) {
-        if plugin.config_key == config_key || plugin.id == id {
-            return Err(format!(
-                "已登记同 ID 或配置标识的插件：{}；请先卸载或取消登记。",
-                plugin.name
-            ));
-        }
-    }
+    let previous = installed(&target, &id, &config_key)?;
+    check_conflicts(draft, &id, &config_key, &target)?;
     let mut validation = draft.document()?;
     mini_launcher::plugin_config::register_in_document(&package, &mut validation)?;
     let (settings, _) = config::parse_and_complete(&validation.to_string())?;
-    mini_launcher::plugin_catalog::validate_web_keywords(&settings.plugins, &settings.web_search)?;
-    model::validate_plugin_schemas(&settings.plugins)?;
+    if previous.is_none() {
+        mini_launcher::plugin_catalog::validate_web_keywords(
+            &settings.plugins,
+            &settings.web_search,
+        )?;
+        model::validate_plugin_schemas(&settings.plugins)?;
+    }
     Ok(InstallPlan {
         name: manifest["name"].as_str().unwrap_or(&id).into(),
         id,
@@ -338,25 +393,20 @@ pub fn prepare(source: &Path, draft: &Draft) -> Result<InstallPlan, String> {
         _stage: stage,
         entries: budget.entries,
         bytes: budget.bytes,
+        previous,
     })
 }
 pub fn install(plan: InstallPlan, draft: &mut Draft) -> Result<String, String> {
     clean(draft)?;
     *draft = Draft::load(draft.path.clone())?;
-    if fs::symlink_metadata(&plan.target).is_ok() {
-        return Err("安装目录在确认后已被其他程序创建，未覆盖任何文件".into());
-    }
-    #[cfg(windows)]
-    {
-        let settings: config::Settings = draft.value.clone().try_into().map_err(error)?;
-        if mini_launcher::plugin_catalog::inspect(&settings.plugins)
-            .iter()
-            .any(|p| p.config_key == plan.config_key || p.id == plan.id)
-        {
-            return Err("确认后出现了同标识插件，安装已取消，请重新检查插件列表。".into());
-        }
-    }
     directory(plan.target.parent().ok_or("安装目录无效")?)?;
+    if installed(&plan.target, &plan.id, &plan.config_key)? != plan.previous {
+        return Err("安装目录在确认后已变化，请重新选择插件包".into());
+    }
+    check_conflicts(draft, &plan.id, &plan.config_key, &plan.target)?;
+    if let Some(previous) = &plan.previous {
+        return update(&plan, previous, draft);
+    }
     fs::rename(&plan.package, &plan.target).map_err(error)?;
     let result = draft.register(&plan.target).and_then(|_| draft.save(false));
     if let Err(error) = result {
@@ -374,6 +424,168 @@ pub fn install(plan: InstallPlan, draft: &mut Draft) -> Result<String, String> {
         plan.id,
         plan.target.display()
     ))
+}
+
+fn update(plan: &InstallPlan, previous: &Installed, draft: &mut Draft) -> Result<String, String> {
+    let backups = storage(draft)?.join("plugin-backups");
+    directory(&backups)?;
+    let backup = backups.join(format!("{}-update-{}", plan.config_key, unique()));
+    let fields = [key("plugins"), key(&plan.config_key), key("enabled")];
+    let enabled = model::at(&draft.value, &fields).cloned();
+    let temporarily_disabled = enabled.as_ref().and_then(Value::as_bool) != Some(false);
+    if temporarily_disabled {
+        set_enabled(draft, &plan.config_key, Some(Value::Boolean(false)))?;
+        if let Err(error) = draft.save(false) {
+            *draft = Draft::load(draft.path.clone())?;
+            return Err(error);
+        }
+    }
+    let mut archived = false;
+    let mut replaced = false;
+    let install = (|| {
+        let guard = wait_stopped(Some(&plan.target.join(&previous.executable)))?;
+        if installed(&plan.target, &plan.id, &plan.config_key)?.as_ref() != Some(previous) {
+            return Err("安装目录在等待停用时已变化，请重新选择插件包".into());
+        }
+        carry_existing_files(plan, previous)?;
+        drop(guard);
+        fs::rename(&plan.target, &backup).map_err(error)?;
+        archived = true;
+        fs::rename(&plan.package, &plan.target).map_err(error)?;
+        replaced = true;
+        // Reload the disabled baseline before merging newly introduced defaults.
+        *draft = Draft::load(draft.path.clone())?;
+        draft.register(&plan.target)?;
+        if temporarily_disabled {
+            set_enabled(
+                draft,
+                &plan.config_key,
+                enabled.clone().or(Some(Value::Boolean(true))),
+            )?;
+        }
+        draft.save(false)
+    })();
+    if let Err(cause) = install {
+        if archived {
+            if (replaced && fs::rename(&plan.target, &plan.package).is_err())
+                || fs::rename(&backup, &plan.target).is_err()
+            {
+                *draft = Draft::load(draft.path.clone())?;
+                return Err(format!(
+                    "更新失败：{cause}。旧目录保留在 {}，请检查。",
+                    backup.display()
+                ));
+            }
+        }
+        *draft = Draft::load(draft.path.clone())?;
+        if temporarily_disabled {
+            set_enabled(draft, &plan.config_key, enabled)?;
+            if let Err(restore) = draft.save(false) {
+                *draft = Draft::load(draft.path.clone())?;
+                return Err(format!(
+                    "更新失败：{cause}。旧文件已保留，无法恢复启用状态：{restore}"
+                ));
+            }
+        }
+        return Err(format!("更新已回滚：{cause}"));
+    }
+    Ok(format!(
+        "已更新 {}（{}）\n旧版本备份：{}\n若宿主尚未刷新，请从托盘重新加载配置。",
+        plan.name,
+        plan.id,
+        backup.display()
+    ))
+}
+
+fn set_enabled(draft: &mut Draft, config_key: &str, enabled: Option<Value>) -> Result<(), String> {
+    let plugins = draft
+        .value
+        .get_mut("plugins")
+        .and_then(Value::as_table_mut)
+        .ok_or("缺少插件配置表")?;
+    let entry = plugins
+        .entry(config_key)
+        .or_insert_with(|| Value::Table(toml::Table::new()));
+    let entry = entry.as_table_mut().ok_or("插件配置不是表")?;
+    if let Some(value) = enabled {
+        entry.insert("enabled".into(), value);
+    } else {
+        entry.remove("enabled");
+    }
+    Ok(())
+}
+
+fn carry_existing_files(plan: &InstallPlan, previous: &Installed) -> Result<(), String> {
+    let parsed: serde_json::Value = serde_json::from_str(&previous.manifest).map_err(error)?;
+    let mut skip = vec![
+        PathBuf::from("plugin.json"),
+        PathBuf::from("settings.schema.json"),
+        previous.executable.clone(),
+    ];
+    if let Some(defaults) = parsed["config_defaults"]
+        .as_str()
+        .and_then(|name| relative(name).ok())
+    {
+        skip.push(defaults);
+    }
+    fn copy_missing(
+        source: &Path,
+        target: &Path,
+        path: &Path,
+        skip: &[PathBuf],
+        depth: usize,
+        budget: &mut Budget,
+    ) -> Result<(), String> {
+        if depth > 32 {
+            return Err("现有插件目录层级过深".into());
+        }
+        for entry in fs::read_dir(source).map_err(error)? {
+            let entry = entry.map_err(error)?;
+            let name = entry
+                .file_name()
+                .into_string()
+                .map_err(|_| "现有插件文件名必须为 Unicode")?;
+            let path = path.join(relative(&name)?);
+            let equal = |other: &PathBuf| {
+                path.to_string_lossy()
+                    .eq_ignore_ascii_case(&other.to_string_lossy())
+            };
+            if skip.iter().any(equal) {
+                continue;
+            }
+            let source_path = entry.path();
+            let destination = target.join(&name);
+            let meta = fs::symlink_metadata(&source_path).map_err(error)?;
+            if reparse(&meta) {
+                continue; // Remains in the full backup.
+            }
+            let destination_is_dir = match fs::symlink_metadata(&destination) {
+                Ok(meta) => meta.is_dir(),
+                Err(e) if e.kind() == io::ErrorKind::NotFound => {
+                    if !meta.is_dir() {
+                        copy_tree(&source_path, &destination, depth, budget)?;
+                        continue;
+                    }
+                    budget.add(0)?;
+                    fs::create_dir(&destination).map_err(error)?;
+                    true
+                }
+                Err(e) => return Err(error(e)),
+            };
+            if meta.is_dir() && destination_is_dir {
+                copy_missing(&source_path, &destination, &path, skip, depth + 1, budget)?;
+            }
+        }
+        Ok(())
+    }
+    copy_missing(
+        &plan.target,
+        &plan.package,
+        Path::new(""),
+        &skip,
+        0,
+        &mut Budget::default(),
+    )
 }
 
 pub struct UninstallPlan {
@@ -684,7 +896,7 @@ pub(crate) mod tests {
         assert!(prepare(&source, &draft).is_ok());
     }
     #[test]
-    fn wrapper_zip_installs_and_existing_destination_is_never_overwritten() {
+    fn wrapper_zip_updates_in_place_and_preserves_configuration_and_data() {
         let fixture = Fixture::new();
         let source = source(&fixture);
         let mut draft = fixture.draft();
@@ -706,11 +918,87 @@ pub(crate) mod tests {
             fs::read_to_string(target.join("tool.exe")).unwrap(),
             "zip executable fixture"
         );
-        assert!(prepare(&archive, &draft).err().unwrap().contains("已存在"));
+        fs::write(target.join("local-data.dat"), "user data").unwrap();
+        fs::write(target.join("settings.schema.json"), "{}").unwrap();
+        draft.value["plugins"]["demo"]["option"] = Value::String("custom".into());
+        draft.value["plugins"]["demo"]["enabled"] = Value::Boolean(false);
+        draft.save(false).unwrap();
+        zip(
+            &archive,
+            &[
+                ("demo/plugin.json", &manifest),
+                (
+                    "demo/defaults.toml",
+                    b"option='new default'\nnew_option=true",
+                ),
+                ("demo/tool.exe", b"updated executable"),
+            ],
+        );
+        let plan = prepare(&archive, &draft).unwrap();
+        assert!(plan.is_update());
+        install(plan, &mut draft).unwrap();
+        assert_eq!(
+            draft.value["plugins"]["demo"]["option"].as_str(),
+            Some("custom")
+        );
+        assert_eq!(
+            draft.value["plugins"]["demo"]["enabled"].as_bool(),
+            Some(false)
+        );
+        assert_eq!(
+            draft.value["plugins"]["demo"]["new_option"].as_bool(),
+            Some(true)
+        );
         assert_eq!(
             fs::read_to_string(target.join("tool.exe")).unwrap(),
+            "updated executable"
+        );
+        assert_eq!(
+            fs::read_to_string(target.join("local-data.dat")).unwrap(),
+            "user data"
+        );
+        assert!(!target.join("settings.schema.json").exists());
+        let backup = fs::read_dir(fixture.0.join("plugin-backups"))
+            .unwrap()
+            .next()
+            .unwrap()
+            .unwrap()
+            .path();
+        assert_eq!(
+            fs::read_to_string(backup.join("tool.exe")).unwrap(),
             "zip executable fixture"
         );
+    }
+
+    #[test]
+    fn invalid_updated_schema_rolls_back_files_and_restores_enabled_state() {
+        let fixture = Fixture::new();
+        let source = source(&fixture);
+        let mut draft = fixture.draft();
+        draft.value["plugins"]["enabled"] = Value::Boolean(true);
+        draft.save(false).unwrap();
+        let plan = prepare(&source, &draft).unwrap();
+        let target = plan.target.clone();
+        install(plan, &mut draft).unwrap();
+        fs::write(source.join("tool.exe"), "new executable").unwrap();
+        fs::write(
+            source.join("settings.schema.json"),
+            r#"{"fields":{"option":{"type":"integer"}}}"#,
+        )
+        .unwrap();
+        let plan = prepare(&source, &draft).unwrap();
+        assert!(install(plan, &mut draft)
+            .unwrap_err()
+            .contains("更新已回滚"));
+        assert_eq!(
+            draft.value["plugins"]["demo"]["enabled"].as_bool(),
+            Some(true)
+        );
+        assert_eq!(
+            fs::read_to_string(target.join("tool.exe")).unwrap(),
+            "fixture, never executed"
+        );
+        assert!(!target.join("settings.schema.json").exists());
     }
     #[test]
     fn traversal_duplicate_and_symlink_archives_leave_no_active_files() {
