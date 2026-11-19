@@ -1,5 +1,12 @@
 use super::*;
-use std::{ptr, slice};
+use serde_json::json;
+use std::{
+    io::{Read, Write},
+    os::windows::process::CommandExt,
+    process::{Command, Stdio},
+    ptr, slice,
+    time::{Duration, Instant},
+};
 use windows_sys::Win32::{Foundation::ERROR_NOT_FOUND, Security::Credentials::*};
 
 pub(super) struct CredentialEditor {
@@ -7,7 +14,9 @@ pub(super) struct CredentialEditor {
     target: Vec<u16>,
     username: Entity<InputState>,
     password: Entity<InputState>,
-    feedback: Option<Result<(), String>>,
+    feedback: Option<String>,
+    test_fields: Option<Vec<String>>,
+    testing: bool,
 }
 
 impl CredentialEditor {
@@ -51,7 +60,17 @@ impl CredentialEditor {
                     .placeholder("输入新密码")
                     .masked(true)
             }),
-            feedback: existing.err().map(Err),
+            feedback: existing.err(),
+            test_fields: schema["windows_credential"]["test"]["fields"]
+                .as_array()
+                .filter(|fields| fields.len() <= 16)
+                .and_then(|fields| {
+                    fields
+                        .iter()
+                        .map(|field| field.as_str().map(str::to_owned))
+                        .collect()
+                }),
+            testing: false,
         })
     }
 
@@ -99,20 +118,27 @@ impl CredentialEditor {
                         div()
                             .text_sm()
                             .text_color(cx.theme().muted_foreground)
-                            .child(
-                                match &self.feedback {
-                                    Some(Ok(())) => "凭据已保存。请重新加载 MiniLauncher 配置。",
-                                    Some(Err(error)) => error,
-                                    None => "凭据保存在当前用户的 Windows 凭据管理器中。",
-                                }
-                                .to_owned(),
-                            ),
+                            .child(self.feedback.clone().unwrap_or_else(|| {
+                                "凭据保存在当前用户的 Windows 凭据管理器中。".into()
+                            })),
                     )
+                    .when(self.test_fields.is_some(), |row| {
+                        row.child(
+                            Button::new("test-plugin-credential")
+                                .label(if self.testing {
+                                    "正在测试…"
+                                } else {
+                                    "测试连接"
+                                })
+                                .disabled(busy || self.testing)
+                                .on_click(cx.listener(start_test)),
+                        )
+                    })
                     .child(
                         Button::new("save-plugin-credential")
                             .primary()
                             .label("保存凭据")
-                            .disabled(busy)
+                            .disabled(busy || self.testing)
                             .on_click(cx.listener(|this, _, window, cx| {
                                 if let Some(editor) = &mut this.plugin_credentials {
                                     let username = editor.username.read(cx).value();
@@ -123,7 +149,12 @@ impl CredentialEditor {
                                             state.set_value("", window, cx)
                                         });
                                     }
-                                    editor.feedback = Some(result);
+                                    editor.feedback = Some(match result {
+                                        Ok(()) => {
+                                            "凭据已保存。请重新加载 MiniLauncher 配置。".into()
+                                        }
+                                        Err(error) => error,
+                                    });
                                     cx.notify();
                                 }
                             })),
@@ -131,6 +162,128 @@ impl CredentialEditor {
             )
             .into_any_element()
     }
+}
+
+fn start_test(
+    this: &mut Settings,
+    _: &ClickEvent,
+    window: &mut Window,
+    cx: &mut Context<Settings>,
+) {
+    let Some(plugin) = this.current_plugin() else {
+        return;
+    };
+    let executable = plugin.executable.clone();
+    let config_key = plugin.config_key.clone();
+    let Some(editor) = &mut this.plugin_credentials else {
+        return;
+    };
+    let Some(fields) = &editor.test_fields else {
+        return;
+    };
+    if editor.testing || this.busy {
+        return;
+    }
+    let mut values = serde_json::Map::new();
+    for name in fields {
+        let path = vec![key("plugins"), key(&config_key), key(name)];
+        let current = this
+            .fields
+            .iter()
+            .find(|field| field.path == path)
+            .map(|field| field.value(cx))
+            .transpose();
+        let value = match current {
+            Ok(value) => value
+                .flatten()
+                .or_else(|| at(&this.draft.value, &path).cloned()),
+            Err(message) => {
+                editor.feedback = Some(message);
+                cx.notify();
+                return;
+            }
+        };
+        if let Some(value) = value.and_then(|value| serde_json::to_value(value).ok()) {
+            values.insert(name.clone(), value);
+        }
+    }
+    let request = json!({"jsonrpc":"2.0","id":1,"method":"settings.test","params":{
+        "settings": values,
+        "credential_target": String::from_utf16_lossy(&editor.target[..editor.target.len() - 1]),
+        "username": editor.username.read(cx).value().to_string(),
+        "password": editor.password.read(cx).value().to_string()
+    }});
+    let identity = editor.username.entity_id();
+    editor.testing = true;
+    editor.feedback = Some("正在测试连接…".into());
+    cx.notify();
+    let task = cx
+        .background_executor()
+        .spawn(async move { call_test(&executable, &request) });
+    cx.spawn_in(window, async move |view, cx| {
+        let message = task.await;
+        let _ = view.update_in(cx, |this, _, cx| {
+            if let Some(editor) = &mut this.plugin_credentials {
+                if editor.username.entity_id() == identity {
+                    editor.testing = false;
+                    editor.feedback = Some(message.unwrap_or_else(|error| error));
+                    cx.notify();
+                }
+            }
+        });
+    })
+    .detach();
+}
+
+fn call_test(executable: &std::path::Path, request: &serde_json::Value) -> Result<String, String> {
+    let mut bytes = serde_json::to_vec(request).map_err(|_| "无法创建连接测试请求")?;
+    bytes.push(b'\n');
+    if bytes.len() > 4096 {
+        return Err("连接测试输入过长。".into());
+    }
+    let mut child = Command::new(executable)
+        .arg("--settings-test")
+        .creation_flags(windows_sys::Win32::System::Threading::CREATE_NO_WINDOW)
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::null())
+        .spawn()
+        .map_err(|_| "无法启动插件的连接测试")?;
+    let write_result = child.stdin.take().unwrap().write_all(&bytes);
+    let deadline = Instant::now() + Duration::from_secs(28);
+    while write_result.is_ok() && Instant::now() < deadline {
+        match child.try_wait() {
+            Ok(Some(status)) if status.success() => {
+                let mut data = Vec::new();
+                child
+                    .stdout
+                    .take()
+                    .unwrap()
+                    .take(4097)
+                    .read_to_end(&mut data)
+                    .map_err(|_| "无法读取连接测试结果")?;
+                let result: serde_json::Value =
+                    serde_json::from_slice(&data).map_err(|_| "插件返回了无效的连接测试结果")?;
+                return (result["jsonrpc"] == "2.0" && result["id"] == 1)
+                    .then(|| result["result"]["message"].as_str())
+                    .flatten()
+                    .filter(|message| !message.is_empty() && message.len() <= 1024)
+                    .map(str::to_owned)
+                    .ok_or_else(|| "插件返回了无效的连接测试结果".into());
+            }
+            Ok(Some(_)) => return Err("插件的连接测试进程异常退出。".into()),
+            Ok(None) => std::thread::sleep(Duration::from_millis(50)),
+            Err(_) => break,
+        }
+    }
+    let _ = child.kill();
+    let _ = child.wait();
+    Err(if Instant::now() >= deadline {
+        "连接测试超时。"
+    } else {
+        "无法完成插件连接测试。"
+    }
+    .into())
 }
 
 fn saved_username(target: &[u16]) -> Result<Option<String>, String> {

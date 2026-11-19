@@ -58,6 +58,8 @@ WorkspaceHub 集成与翻译插件在独立的 `MiniLauncher.plugs` 项目中维
 
 `settings.schema.json` 可用 `"windows_credential": {"target_field": "credential_reference"}` 声明一组 Windows 普通凭据。插件默认配置应提供同名的字符串字段，值为该插件所用的凭据名称。设置页将该字段显示为独立的用户名和密码输入框，点击「保存凭据」后直接写入当前 Windows 用户的凭据管理器。密码输入框始终以空值打开。凭据内容由插件按名称读取，主配置仅保存凭据名称。旧版设置程序会将该字段显示为普通文本框。
 
+可在 `windows_credential` 中加上 `"test": {"fields": ["endpoint"]}`，提供「测试连接」按钮。设置程序以 `--settings-test` 启动插件清单中的可执行文件，并通过标准输入发送一行 UTF-8 JSON-RPC 2.0 `settings.test` 请求。参数为 `settings`（指定字段的当前值）、`credential_target`、`username` 和 `password`。密码留空时，插件可按名称读取已保存的凭据。插件只读检查连接，在标准输出返回一行带相同 ID 和 `result.message` 的响应，然后退出。结果仅包含状态说明。
+
 ## 清单
 
 ```json
